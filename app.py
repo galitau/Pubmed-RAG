@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 import google.generativeai as genai
 from metapub import PubMedFetcher
+import datetime
 
 # load environment variables from .env file
 load_dotenv()
@@ -22,7 +23,8 @@ st.sidebar.title("Pubmed RAG with Gemini")
 st.sidebar.markdown("### Settings")
 
 # Date Filter
-start_year = st.sidebar.slider("Search papers from year:", 2000, 2025, 2023)
+current_year = datetime.datetime.now().year
+year_range = st.sidebar.slider("Search papers from year:", 1871, current_year, (1980,2020))
 
 # API Key Status indicator
 if api_key:
@@ -65,14 +67,14 @@ if search_clicked:
     if not api_key:
         st.error("Please configure your API Key in .env file to proceed.")
     else:
-        with st.spinner(f"Querying PubMed for '{user_query}' ({start_year}-Present)..."):
+        with st.spinner(f"Querying PubMed for '{user_query}' ({year_range[0]}-{year_range[1]})..."):
             try:
                 # Configure AI
                 genai.configure(api_key=api_key)
                 
                 # Fetch Data
                 fetch = PubMedFetcher()
-                pm_query = f"{user_query} AND {start_year}:3000[dp]" # dp for date of publication
+                pm_query = f"{user_query} AND {year_range[0]}:{year_range[1]}[dp]" # dp for date of publication
                 pmids = fetch.pmids_for_query(pm_query, retmax=10) # Returns a list of 10 PMIDs
                 
                 # Clears previous abstracts
