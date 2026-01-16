@@ -4,12 +4,26 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 from metapub import PubMedFetcher
 import datetime
+#from metapub import FindIt
 
 # load environment variables from .env file
 load_dotenv()
 
 # Get key from environment variable
 api_key = os.getenv("GEMINI_API_KEY")
+
+# Session State for memory
+if 'abstracts' not in st.session_state: # Makes sure abstracts are stored when re-running
+    st.session_state['abstracts'] = ""
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "summary" not in st.session_state:
+    st.session_state.summary = None
+
+if "free_only" not in st.session_state:
+    st.session_state.free_only = False
 
 # Page Configuration
 st.set_page_config(
@@ -26,6 +40,12 @@ st.sidebar.markdown("### Settings")
 current_year = datetime.datetime.now().year
 year_range = st.sidebar.slider("Search papers from year:", 1871, current_year, (1980,2020))
 
+# Number of papers to look at
+paper_count = st.sidebar.number_input("Number of papers to retrieve:", 1, 1000) 
+
+# Free access toggle
+st.session_state.free_only = st.sidebar.toggle("Free Full-Text Access Only", value=False) 
+
 # API Key Status indicator
 if api_key:
     st.sidebar.success("API Key Loaded Securely")
@@ -40,16 +60,6 @@ st.markdown(
     *Retrieves clinical abstracts, filters by date, and generates consensus summaries using AI.*
     """
 )
-
-# Session State for Chat Memory
-if 'abstracts' not in st.session_state: # Makes sure abstracts are stored when re-running
-    st.session_state['abstracts'] = ""
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "summary" not in st.session_state:
-    st.session_state.summary = None
     
 # Search interface
 col1, col2 = st.columns([2, 1]) # col1 gets 2/3 of the screen, col2 gets 1/3
@@ -75,24 +85,45 @@ if search_clicked:
                 # Fetch Data
                 fetch = PubMedFetcher()
                 pm_query = f"{user_query} AND {year_range[0]}:{year_range[1]}[dp]" # dp for date of publication
-                pmids = fetch.pmids_for_query(pm_query, retmax=10) # Returns a list of 10 PMIDs
-                
+                # Request more PMIDs than user required to account for results without abstracts/non-free papers
+                pmids = fetch.pmids_for_query(pm_query, retmax=max(40, int(paper_count * 2)))
+
                 # Clears previous abstracts
                 st.session_state['abstracts'] = ""
                 found_count = 0
                 paper_links = []
-                
-                # Process each PMID
+                    
+                # Process each PMID until we have paper_count abstracts
                 for pmid in pmids:
-                    article = fetch.article_by_pmid(pmid)
-                    if article.abstract:
-                        st.session_state['abstracts'] += f"TITLE: {article.title}\n"
-                        st.session_state['abstracts'] += f"AUTHORS: {str(article.authors)}\n"
-                        st.session_state['abstracts'] += f"ABSTRACT: {article.abstract}\n"
-                        link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-                        st.session_state['abstracts'] += f"LINK: {link}\n"
-                        st.session_state['abstracts'] += "-" * 20 + "\n"
-                        found_count += 1
+                    if found_count >= int(paper_count):
+                        break
+                    try:
+                        article = fetch.article_by_pmid(pmid)
+                        if article.abstract:
+                            if st.session_state.free_only: # Makes sure all articles are free full-text
+                                if article.pmc is not None:
+                                    st.session_state['abstracts'] += f"TITLE: {article.title}\n"
+                                    st.session_state['abstracts'] += f"AUTHORS: {str(article.authors)}\n"
+                                    st.session_state['abstracts'] += f"ABSTRACT: {article.abstract}\n"
+                                    st.session_state['abstracts'] += f"FREE: True \n"
+                                    link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                                    st.session_state['abstracts'] += f"LINK: {link}\n"
+                                    st.session_state['abstracts'] += "-" * 20 + "\n"
+                                    found_count += 1
+                                else:
+                                    continue
+                            else:
+                                st.session_state['abstracts'] += f"TITLE: {article.title}\n"
+                                st.session_state['abstracts'] += f"AUTHORS: {str(article.authors)}\n"
+                                st.session_state['abstracts'] += f"ABSTRACT: {article.abstract}\n"
+                                st.session_state['abstracts'] += f"FREE: {article.pmc is not None} \n"
+                                link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                                st.session_state['abstracts'] += f"LINK: {link}\n"
+                                st.session_state['abstracts'] += "-" * 20 + "\n"
+                                found_count += 1
+                    except Exception as e:
+                        # Skip any articles that cause errors
+                        continue
                 
                 if found_count > 0:
                     # Generate Summary
@@ -103,7 +134,7 @@ if search_clicked:
                     Given the following abstracts from recent PubMed papers on a specific research topic, perform the following tasks:
                     1. Synthesize a summary of findings based ONLY on the provided abstracts.
                     2. Identify the single most relevant paper for the user to read. Start with "The most relevant paper to read is", then explain why you chose it in 1 sentence.
-                    3. Provide a reference section with links to the papers cited.
+                    3. Provide a reference section in IEEE format. Make sure there are two empty lines between each reference. If the article is free, indicate that in the reference with [Free Access].
                     
                     Here are the abstracts:
                     {st.session_state['abstracts']}
@@ -121,7 +152,6 @@ if search_clicked:
 # Chat interface for follow-up questions
 if st.session_state['abstracts']:
     # Displays the Summary (Always visible at the top)
-    st.subheader("Summary")
     st.info(st.session_state.summary)
 
     st.divider()
