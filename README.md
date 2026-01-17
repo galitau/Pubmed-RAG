@@ -18,17 +18,7 @@ It uses a technique called **RAG (Retrieval-Augmented Generation)** to make sure
 * **Metapub Library** (to access PubMed)
 
 ## Demo
-<img width="1870" height="418" alt="image" src="https://github.com/user-attachments/assets/1f9f8646-20b7-405a-b73e-aad3aa0c0f15" />
-<img width="1839" height="828" alt="image" src="https://github.com/user-attachments/assets/f0c09757-d3df-4cf2-89e6-2752c1a98407" />
-<img width="1839" height="833" alt="image" src="https://github.com/user-attachments/assets/f1aa6a1a-6466-4631-a34b-2ca433f5055f" />
-<img width="1836" height="830" alt="image" src="https://github.com/user-attachments/assets/e9e60eb9-1157-4da8-99bb-7e6cefdf3b92" />
-<img width="1832" height="849" alt="image" src="https://github.com/user-attachments/assets/fb72e410-d62a-4771-8e38-33052d9b4f87" />
-
-
-https://github.com/user-attachments/assets/265c2072-bf4a-4fbf-ae5b-df229cba2fb5
-
-
-
+https://github.com/user-attachments/assets/b21de8d1-b248-47c9-942c-9e269daee2eb
 
 ## How to Run It
 
