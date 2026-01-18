@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 from metapub import PubMedFetcher
 import datetime
-#from metapub import FindIt
+import time
+from pdf_generator import create_pdf
 
 # load environment variables from .env file
 load_dotenv()
@@ -44,7 +45,7 @@ year_range = st.sidebar.slider("Search papers from year:", 1871, current_year, (
 paper_count = st.sidebar.number_input("Number of papers to retrieve:", 1, 1000) 
 
 # Free access toggle
-st.session_state.free_only = st.sidebar.toggle("Free Full-Text Access Only", value=False) 
+st.session_state.free_only = st.sidebar.toggle("Include Non-Free Articles", value=False) 
 
 # API Key Status indicator
 if api_key:
@@ -82,6 +83,10 @@ if search_clicked:
                 # Configure AI
                 genai.configure(api_key=api_key)
                 
+                # Initialize PubMed Fetcher
+                ncbi_key = os.getenv("NCBI_API_KEY")
+                fetch = PubMedFetcher(cachedir="cache") # Uses local cache to speed up re-runs
+
                 # Fetch Data
                 fetch = PubMedFetcher()
                 pm_query = f"{user_query} AND {year_range[0]}:{year_range[1]}[dp]" # dp for date of publication
@@ -99,28 +104,30 @@ if search_clicked:
                         break
                     try:
                         article = fetch.article_by_pmid(pmid)
-                        if article.abstract:
-                            if st.session_state.free_only: # Makes sure all articles are free full-text
-                                if article.pmc is not None:
-                                    st.session_state['abstracts'] += f"TITLE: {article.title}\n"
-                                    st.session_state['abstracts'] += f"AUTHORS: {str(article.authors)}\n"
-                                    st.session_state['abstracts'] += f"ABSTRACT: {article.abstract}\n"
-                                    st.session_state['abstracts'] += f"FREE: True \n"
-                                    link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-                                    st.session_state['abstracts'] += f"LINK: {link}\n"
-                                    st.session_state['abstracts'] += "-" * 20 + "\n"
-                                    found_count += 1
-                                else:
-                                    continue
-                            else:
-                                st.session_state['abstracts'] += f"TITLE: {article.title}\n"
-                                st.session_state['abstracts'] += f"AUTHORS: {str(article.authors)}\n"
-                                st.session_state['abstracts'] += f"ABSTRACT: {article.abstract}\n"
-                                st.session_state['abstracts'] += f"FREE: {article.pmc is not None} \n"
-                                link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-                                st.session_state['abstracts'] += f"LINK: {link}\n"
-                                st.session_state['abstracts'] += "-" * 20 + "\n"
-                                found_count += 1
+
+                        # Handle Free Only Toggle
+                        is_free = article.pmc is not None
+                        if not st.session_state.free_only and not is_free:
+                            continue
+                        
+                        # Uses gettattr to avoid errors if 'authors' attribute is missing
+                        authors_list = getattr(article, 'authors', [])
+                        authors_str = ", ".join(authors_list) if authors_list else "No Authors Listed"
+
+                        # Append to dataset
+                        st.session_state['abstracts'] += f"TITLE: {article.title}\n"
+                        st.session_state['abstracts'] += f"AUTHORS: {authors_str}\n"
+                        abstract_text = article.abstract if article.abstract else "No abstract available"
+                        st.session_state['abstracts'] += f"ABSTRACT: {abstract_text}\n"
+                        st.session_state['abstracts'] += f"FREE: {is_free} \n"
+                        link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                        st.session_state['abstracts'] += f"LINK: {link}\n"
+                        st.session_state['abstracts'] += "-" * 20 + "\n"
+                        found_count += 1
+
+                        if not ncbi_key:
+                            time.sleep(0.35) # To avoid hitting rate limits without an API key
+
                     except Exception as e:
                         # Skip any articles that cause errors
                         continue
@@ -183,10 +190,58 @@ if st.session_state['abstracts']:
                 
                 Question:
                 {chat_q}
+
+                For context, here are the previous messages in this conversation:
+                {st.session_state.messages}
                 """
                 chat_response = model.generate_content(chat_prompt)
                 st.markdown(chat_response.text)
         
         # Appends chat messages to session state
         st.session_state.messages.append({"role": "assistant", "content": chat_response.text})
+
+    # Export Section
+    if st.session_state.summary:
+        st.divider()
+        st.subheader("📥 Export Your Research")
+
+        # Combines the query, summary, and source abstracts into one string
+        report_text = f"--- PUBMED LITERATURE REVIEW ---\n"
+        report_text += f"DATE: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        report_text += f"TOPIC: {user_query}\n"
+        report_text += f"SEARCH RANGE: {year_range[0]}-{year_range[1]}\n"
+        report_text += "-" * 40 + "\n\n"
+        report_text += "AI SUMMARY\n"
+        report_text += st.session_state.summary + "\n\n"
+        report_text += "-" * 40 + "\n"
+
+        # Adds chat log to a separate string
+        chat_log_text = report_text + "\n" + "-" * 40 + "\n"
+        chat_log_text += "FOLLOW-UP CHAT LOG \n\n"
+        
+        for msg in st.session_state.messages:
+            role = msg["role"].upper()
+            content = msg["content"]
+            chat_log_text += f"[{role}]: {content}\n\n"
+
+        # Download Buttons
+        d_col1, d_col2 = st.columns(2)
+
+        with d_col1:
+            pdf_bytes_summary = create_pdf(report_text)
+            st.download_button(
+                label="📄 Download Summary (PDF)",
+                data=pdf_bytes_summary,
+                file_name=f"Research_Summary_{datetime.date.today()}.pdf",
+                mime="application/pdf"
+            )
+
+        with d_col2:
+            pdf_bytes_summary2 = create_pdf(chat_log_text)
+            st.download_button(
+                label="📄 Download Summary (PDF) With Chat History",
+                data=pdf_bytes_summary2,
+                file_name=f"Research_Summary_{datetime.date.today()}.pdf",
+                mime="application/pdf"
+            )
     
