@@ -38,6 +38,18 @@ https://github.com/user-attachments/assets/b21de8d1-b248-47c9-942c-9e269daee2eb
    
    ```streamlit run app.py```
 
+## Testing (Smoke + Regression)
+
+This project includes automated test cases for the PDF export module, including:
+* **Smoke Test:** verifies PDF generation works end-to-end
+* **Regression Tests:** guard against failures on empty input, non-latin input, and larger report payloads
+
+Run tests from the project root:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
 ## What I Learned
 * **Building RAG Applications:** I learned how to feed real-time data into an LLM to get accurate, factual responses
 * **Session State:** I figured out how to use Streamlit's session state to keep the chat history and summary from disappearing when the page reloads
