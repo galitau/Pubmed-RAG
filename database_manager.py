@@ -17,6 +17,7 @@ class ResearchDB:
         self.collection_name = collection_name
         self.client = None
         self.collection = None
+        self.embedding_function = None
 
         if not self.enabled:
             return
@@ -30,18 +31,36 @@ class ResearchDB:
             self.client = chromadb.PersistentClient(path=persist_directory)
 
             # Embedding function wrapper for Google Generative AI, which will be used to convert abstracts and queries into vector embeddings for similarity search
-            embedding_fn = embedding_functions.GoogleGenerativeAiEmbeddingFunction(api_key=api_key)
+            self.embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(api_key=api_key)
 
             # Get or create collection with embedding function
-            try:
-                self.collection = self.client.get_collection(name=collection_name, embedding_function=embedding_fn)
-            except Exception:
-                # If get_collection not available or fails, try create
-                self.collection = self.client.create_collection(name=collection_name, embedding_function=embedding_fn)
+            self.collection = self.client.get_or_create_collection(
+                name=collection_name,
+                embedding_function=self.embedding_function,
+            )
 
         except Exception as e:
             # Disable DB usage if initialization fails
             self.enabled = False
+
+    def reset_collection(self):
+        """Delete the current collection and recreate an empty one."""
+        if not self.enabled or not self.client:
+            return False
+
+        try:
+            try:
+                self.client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+
+            self.collection = self.client.get_or_create_collection(
+                name=self.collection_name,
+                embedding_function=self.embedding_function,
+            )
+            return self.collection is not None
+        except Exception:
+            return False
 
     def add_abstracts(self, abstracts: List[str], metadatas: List[Dict[str, Any]], ids: List[str]):
         """Add documents to the ChromaDB collection.

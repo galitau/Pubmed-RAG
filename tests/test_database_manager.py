@@ -105,6 +105,38 @@ class TestResearchDB:
         add_result = db.add_abstracts(["test"], [{"year": "2020"}], ["id_1"])
         assert add_result is False
 
+    def test_reset_collection_recreates_collection(self):
+        """Test that reset_collection deletes the old collection and recreates it safely"""
+        if not self.db.enabled:
+            pytest.skip("ChromaDB not enabled")
+
+        class FakeClient:
+            def __init__(self):
+                self.deleted = []
+                self.created = []
+
+            def delete_collection(self, name):
+                self.deleted.append(name)
+                raise Exception("collection does not exist")
+
+            def get_or_create_collection(self, name, embedding_function=None):
+                self.created.append((name, embedding_function))
+                return object()
+
+        fake_client = FakeClient()
+        self.db.client = fake_client
+        self.db.collection = object()
+        self.db.embedding_function = object()
+        self.db.collection_name = "test_pubmed"
+        self.db.enabled = True
+
+        result = self.db.reset_collection()
+
+        assert result is True
+        assert fake_client.deleted == ["test_pubmed"]
+        assert len(fake_client.created) == 1
+        assert self.db.collection is not None
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

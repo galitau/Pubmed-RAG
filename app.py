@@ -88,6 +88,18 @@ if search_clicked:
     if not api_key:
         st.error("Please configure your API Key in .env file to proceed.")
     else:
+        st.session_state['abstracts'] = ""
+        st.session_state.messages = []
+        st.session_state.summary = None
+        st.session_state.last_retrieval_mode = None
+        st.session_state.last_retrieval_detail = None
+
+        try:
+            if research_db and getattr(research_db, 'enabled', False):
+                research_db.reset_collection()
+        except Exception:
+            pass
+
         with st.spinner(f"Querying PubMed for '{user_query}' ({year_range[0]}-{year_range[1]})..."):
             try:
                 # Configure AI
@@ -102,9 +114,6 @@ if search_clicked:
                 pm_query = f"{user_query} AND {year_range[0]}:{year_range[1]}[dp]" # dp for date of publication
                 # Request more PMIDs than user required to account for results without abstracts/non-free papers
                 pmids = fetch.pmids_for_query(pm_query, retmax=max(40, int(paper_count * 2)))
-
-                # Clears previous abstracts
-                st.session_state['abstracts'] = ""
                 docs_to_add = []
                 metadatas = []
                 ids = []
@@ -182,7 +191,6 @@ if search_clicked:
                     """
                     response = model.generate_content(prompt)
                     st.session_state.summary = response.text
-                    st.session_state.messages = [] # Clear previous chat messages
                     st.success(f"Analysis Complete. Found {found_count} relevant papers.")
                 else:
                     st.warning("No papers with abstracts found. Try a broader term.")
