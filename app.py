@@ -6,12 +6,16 @@ from metapub import PubMedFetcher
 import datetime
 import time
 from pdf_generator import create_pdf
+from database_manager import ResearchDB
 
 # load environment variables from .env file
 load_dotenv()
 
 # Get key from environment variable
 api_key = os.getenv("GEMINI_API_KEY")
+
+# Initialize Research DB (ChromaDB)
+research_db = ResearchDB()
 
 # Session State for memory
 if 'abstracts' not in st.session_state: # Makes sure abstracts are stored when re-running
@@ -95,6 +99,9 @@ if search_clicked:
 
                 # Clears previous abstracts
                 st.session_state['abstracts'] = ""
+                docs_to_add = []
+                metadatas = []
+                ids = []
                 found_count = 0
                 paper_links = []
                     
@@ -114,7 +121,7 @@ if search_clicked:
                         authors_list = getattr(article, 'authors', [])
                         authors_str = ", ".join(authors_list) if authors_list else "No Authors Listed"
 
-                        # Append to dataset
+                        # Prepare text for session and DB
                         st.session_state['abstracts'] += f"TITLE: {article.title}\n"
                         st.session_state['abstracts'] += f"AUTHORS: {authors_str}\n"
                         abstract_text = article.abstract if article.abstract else "No abstract available"
@@ -123,6 +130,21 @@ if search_clicked:
                         link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
                         st.session_state['abstracts'] += f"LINK: {link}\n"
                         st.session_state['abstracts'] += "-" * 20 + "\n"
+
+                        # Add to lists to persist in ChromaDB
+                        doc_text = f"TITLE: {article.title}\nAUTHORS: {authors_str}\nABSTRACT: {abstract_text}\nLINK: {link}\nFREE: {is_free}"
+                        # Try to extract year from article attributes
+                        year = getattr(article, 'year', None)
+                        if not year:
+                            pubdate = getattr(article, 'pubdate', '') or getattr(article, 'publication_date', '')
+                            try:
+                                year = str(pubdate).split()[0][:4]
+                            except Exception:
+                                year = ""
+
+                        docs_to_add.append(doc_text)
+                        metadatas.append({"year": year, "link": link})
+                        ids.append(str(pmid))
                         found_count += 1
 
                         if not ncbi_key:
@@ -133,6 +155,12 @@ if search_clicked:
                         continue
                 
                 if found_count > 0:
+                    # Persist to ChromaDB (if available)
+                    try:
+                        if research_db and getattr(research_db, 'enabled', False):
+                            research_db.add_abstracts(docs_to_add, metadatas, ids)
+                    except Exception:
+                        pass
                     # Generate Summary
                     model = genai.GenerativeModel('gemini-2.5-flash')
                     prompt = f"""
@@ -181,13 +209,35 @@ if st.session_state['abstracts']:
             with st.spinner("Analyzing..."):
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel('gemini-2.5-flash')
+                # Use semantic search to retrieve top-k relevant context chunks
+                context_text = None
+                try:
+                    if research_db and getattr(research_db, 'enabled', False):
+                        res = research_db.query_db(chat_q, n_results=5)
+                        docs = res.get('documents', [])
+                        metas = res.get('metadatas', [])
+                        if docs:
+                            parts = []
+                            for i, d in enumerate(docs):
+                                meta = metas[i] if i < len(metas) else {}
+                                link = meta.get('link', '')
+                                year = meta.get('year', '')
+                                parts.append(f"TITLE/YEAR: {year}\n{d}\nLINK: {link}\n" + "-"*20)
+                            context_text = "\n".join(parts)
+                except Exception:
+                    context_text = None
+
+                # Fallback to full abstracts if semantic DB unavailable
+                if not context_text:
+                    context_text = st.session_state['abstracts']
+
                 chat_prompt = f"""
                 Answer the user question based strictly on the provided abstracts.
                 If the answer is not in the text, state "Not mentioned in these papers."
-                
+
                 Abstracts:
-                {st.session_state['abstracts']}
-                
+                {context_text}
+
                 Question:
                 {chat_q}
 
