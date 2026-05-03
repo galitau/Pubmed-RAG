@@ -112,63 +112,121 @@ if search_clicked:
                 # Fetch Data
                 fetch = PubMedFetcher()
                 pm_query = f"{user_query} AND {year_range[0]}:{year_range[1]}[dp]" # dp for date of publication
-                # Request more PMIDs than user required to account for results without abstracts/non-free papers
-                pmids = fetch.pmids_for_query(pm_query, retmax=max(40, int(paper_count * 2)))
                 docs_to_add = []
                 metadatas = []
                 ids = []
                 found_count = 0
                 paper_links = []
+                processed_count = 0
+                search_start = 0
+                batch_size = max(10, int(paper_count) * 2)
+                target_count = int(paper_count)
                     
-                # Process each PMID until we have paper_count abstracts
-                for pmid in pmids:
-                    if found_count >= int(paper_count):
+                # Keep fetching PMID batches until we have the requested number of valid papers
+                # Initialize UI progress elements
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                while found_count < target_count:
+                    pmids = fetch.pmids_for_query(pm_query, retstart=search_start, retmax=batch_size)
+                    if not pmids:
                         break
-                    try:
-                        article = fetch.article_by_pmid(pmid)
 
-                        # Handle Free Only Toggle
-                        is_free = article.pmc is not None
-                        if not st.session_state.free_only and not is_free:
-                            continue
-                        
-                        # Uses gettattr to avoid errors if 'authors' attribute is missing
-                        authors_list = getattr(article, 'authors', [])
-                        authors_str = ", ".join(authors_list) if authors_list else "No Authors Listed"
+                    total_pmids = len(pmids)
 
-                        # Prepare text for session and DB
-                        st.session_state['abstracts'] += f"TITLE: {article.title}\n"
-                        st.session_state['abstracts'] += f"AUTHORS: {authors_str}\n"
-                        abstract_text = article.abstract if article.abstract else "No abstract available"
-                        st.session_state['abstracts'] += f"ABSTRACT: {abstract_text}\n"
-                        st.session_state['abstracts'] += f"FREE: {is_free} \n"
-                        link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-                        st.session_state['abstracts'] += f"LINK: {link}\n"
-                        st.session_state['abstracts'] += "-" * 20 + "\n"
+                    for idx, pmid in enumerate(pmids):
+                        if found_count >= target_count:
+                            break
 
-                        # Add to lists to persist in ChromaDB
-                        doc_text = f"TITLE: {article.title}\nAUTHORS: {authors_str}\nABSTRACT: {abstract_text}\nLINK: {link}\nFREE: {is_free}"
-                        # Try to extract year from article attributes
-                        year = getattr(article, 'year', None)
-                        if not year:
-                            pubdate = getattr(article, 'pubdate', '') or getattr(article, 'publication_date', '')
+                        try:
+                            article = fetch.article_by_pmid(pmid)
+
+                            processed_count += 1
+
+                            # Update progress based on valid papers collected so far.
+                            progress_pct = int((found_count / max(1, target_count)) * 100)
                             try:
-                                year = str(pubdate).split()[0][:4]
+                                progress_bar.progress(min(progress_pct, 99))
                             except Exception:
-                                year = ""
+                                pass
 
-                        docs_to_add.append(doc_text)
-                        metadatas.append({"year": year, "link": link})
-                        ids.append(str(pmid))
-                        found_count += 1
+                            # Short title fragment for status
+                            title_fragment = getattr(article, 'title', '') or ''
+                            if title_fragment and len(title_fragment) > 120:
+                                title_fragment = title_fragment[:120] + "..."
+                            try:
+                                status_text.text(
+                                    f"Processing paper {found_count + 1} of {target_count}: {title_fragment}"
+                                )
+                            except Exception:
+                                pass
 
-                        if not ncbi_key:
-                            time.sleep(0.35) # To avoid hitting rate limits without an API key
+                            # Handle Free Only Toggle
+                            is_free = article.pmc is not None
+                            if not st.session_state.free_only and not is_free:
+                                continue
+                            
+                            # Uses gettattr to avoid errors if 'authors' attribute is missing
+                            authors_list = getattr(article, 'authors', [])
+                            authors_str = ", ".join(authors_list) if authors_list else "No Authors Listed"
 
-                    except Exception as e:
-                        # Skip any articles that cause errors
-                        continue
+                            # Prepare text for session and DB
+                            st.session_state['abstracts'] += f"TITLE: {article.title}\n"
+                            st.session_state['abstracts'] += f"AUTHORS: {authors_str}\n"
+                            abstract_text = article.abstract if article.abstract else "No abstract available"
+                            st.session_state['abstracts'] += f"ABSTRACT: {abstract_text}\n"
+                            st.session_state['abstracts'] += f"FREE: {is_free} \n"
+                            link = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                            st.session_state['abstracts'] += f"LINK: {link}\n"
+                            st.session_state['abstracts'] += "-" * 20 + "\n"
+
+                            # Add to lists to persist in ChromaDB
+                            doc_text = f"TITLE: {article.title}\nAUTHORS: {authors_str}\nABSTRACT: {abstract_text}\nLINK: {link}\nFREE: {is_free}"
+                            # Try to extract year from article attributes
+                            year = getattr(article, 'year', None)
+                            if not year:
+                                pubdate = getattr(article, 'pubdate', '') or getattr(article, 'publication_date', '')
+                                try:
+                                    year = str(pubdate).split()[0][:4]
+                                except Exception:
+                                    year = ""
+
+                            docs_to_add.append(doc_text)
+                            metadatas.append({"year": year, "link": link})
+                            ids.append(str(pmid))
+                            found_count += 1
+
+                            progress_pct = int((found_count / max(1, target_count)) * 100)
+                            try:
+                                progress_bar.progress(min(progress_pct, 99))
+                            except Exception:
+                                pass
+
+                            if not ncbi_key:
+                                time.sleep(0.35) # To avoid hitting rate limits without an API key
+
+                        except Exception:
+                            # Skip any articles that cause errors
+                            if not ncbi_key:
+                                time.sleep(0.35)
+                            continue
+
+                    search_start += total_pmids
+
+                try:
+                    progress_bar.progress(100 if found_count >= target_count and target_count > 0 else 0)
+                except Exception:
+                    pass
                 
+                # Finalize UI progress elements so summary area is clean
+                try:
+                    status_text.empty()
+                except Exception:
+                    pass
+                try:
+                    progress_bar.empty()
+                except Exception:
+                    pass
+
                 if found_count > 0:
                     # Persist to ChromaDB (if available)
                     try:
@@ -176,27 +234,41 @@ if search_clicked:
                             research_db.add_abstracts(docs_to_add, metadatas, ids)
                     except Exception:
                         pass
-                    # Generate Summary
-                    model = genai.GenerativeModel('gemini-2.5-flash')
-                    prompt = f"""
-                    You are a Senior Biomedical Researcher. Don't fabricate information. If uncertain, state that the information is not available.
-                    Make sure you make headings for each task and never mention "provided abstracts" in your answer.
-                    Given the following abstracts from recent PubMed papers on a specific research topic, perform the following tasks:
-                    1. Synthesize a summary of findings based ONLY on the provided abstracts.
-                    2. Identify the single most relevant paper for the user to read. Start with "The most relevant paper to read is", then explain why you chose it in 1 sentence.
-                    3. Provide a reference section in IEEE format. Make sure there are two empty lines between each reference. If the article is free, indicate that in the reference with [Free Access].
-                    
-                    Here are the abstracts:
-                    {st.session_state['abstracts']}
-                    """
-                    response = model.generate_content(prompt)
-                    st.session_state.summary = response.text
-                    st.success(f"Analysis Complete. Found {found_count} relevant papers.")
-                else:
-                    st.warning("No papers with abstracts found. Try a broader term.")
-                    
+
             except Exception as e:
                 st.error(f"An error occurred: {e}")
+
+        # The retrieval spinner is now gone; only the summary phase should show its own spinner.
+        if found_count > 0:
+            try:
+                status_text.text("PubMed retrieval complete. Generating summary with Gemini...")
+            except Exception:
+                pass
+
+            with st.spinner("Generating summary with Gemini..."):
+                # Generate Summary
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                prompt = f"""
+                You are a Senior Biomedical Researcher. Don't fabricate information. If uncertain, state that the information is not available.
+                Make sure you make headings for each task and never mention "provided abstracts" in your answer.
+                Given the following abstracts from recent PubMed papers on a specific research topic, perform the following tasks:
+                1. Synthesize a summary of findings based ONLY on the provided abstracts.
+                2. Identify the single most relevant paper for the user to read. Start with "The most relevant paper to read is", then explain why you chose it in 1 sentence.
+                3. Provide a reference section in IEEE format. Make sure there are two empty lines between each reference. If the article is free, indicate that in the reference with [Free Access].
+                
+                Here are the abstracts:
+                {st.session_state['abstracts']}
+                """
+                response = model.generate_content(prompt)
+                st.session_state.summary = response.text
+
+            try:
+                status_text.empty()
+            except Exception:
+                pass
+            st.success(f"Analysis Complete. Found {found_count} relevant papers.")
+        else:
+            st.warning("No papers with abstracts found. Try a broader term.")
 
 # Chat interface for follow-up questions
 if st.session_state['abstracts']:
