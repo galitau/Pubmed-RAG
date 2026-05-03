@@ -30,6 +30,12 @@ if "summary" not in st.session_state:
 if "free_only" not in st.session_state:
     st.session_state.free_only = False
 
+if "last_retrieval_mode" not in st.session_state:
+    st.session_state.last_retrieval_mode = None
+
+if "last_retrieval_detail" not in st.session_state:
+    st.session_state.last_retrieval_detail = None
+
 # Page Configuration
 st.set_page_config(
     page_title="PUBMED RAG",
@@ -189,6 +195,11 @@ if st.session_state['abstracts']:
     # Displays the Summary (Always visible at the top)
     st.info(st.session_state.summary)
 
+    if st.session_state.last_retrieval_mode:
+        st.caption(f"Last chat retrieval mode: {st.session_state.last_retrieval_mode}")
+        if st.session_state.last_retrieval_detail:
+            st.caption(st.session_state.last_retrieval_detail)
+
     st.divider()
     st.subheader("Chat with the data:")
     
@@ -206,13 +217,16 @@ if st.session_state['abstracts']:
 
         # Generates chat response
         with st.chat_message("assistant"):
+            retrieval_status = st.empty()
             with st.spinner("Analyzing..."):
                 genai.configure(api_key=api_key)
                 model = genai.GenerativeModel('gemini-2.5-flash')
                 # Use semantic search to retrieve top-k relevant context chunks
                 context_text = None
+                used_vector_db = False
                 try:
                     if research_db and getattr(research_db, 'enabled', False):
+                        used_vector_db = True
                         res = research_db.query_db(chat_q, n_results=5)
                         docs = res.get('documents', [])
                         metas = res.get('metadatas', [])
@@ -226,10 +240,21 @@ if st.session_state['abstracts']:
                             context_text = "\n".join(parts)
                 except Exception:
                     context_text = None
+                    used_vector_db = False
 
                 # Fallback to full abstracts if semantic DB unavailable
                 if not context_text:
                     context_text = st.session_state['abstracts']
+                    used_vector_db = False
+
+                if used_vector_db:
+                    st.session_state.last_retrieval_mode = "Vector embeddings via ChromaDB"
+                    st.session_state.last_retrieval_detail = "This answer used semantic retrieval from the vector store."
+                    retrieval_status.success("Retrieval mode: vector embeddings via ChromaDB")
+                else:
+                    st.session_state.last_retrieval_mode = "Fallback to stored abstracts"
+                    st.session_state.last_retrieval_detail = "This answer did not use vector retrieval; it fell back to the saved abstracts." 
+                    retrieval_status.warning("Retrieval mode: fallback to stored abstracts")
 
                 chat_prompt = f"""
                 Answer the user question based strictly on the provided abstracts.
