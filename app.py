@@ -307,12 +307,12 @@ if st.session_state['abstracts']:
                 try:
                     if research_db and getattr(research_db, 'enabled', False):
                         used_vector_db = True
-                        res = research_db.query_db(chat_q, n_results=5)
-                        docs = res.get('documents', [])
-                        metas = res.get('metadatas', [])
+                        res = research_db.query_db(chat_q, n_results=5) # finds 5 most relevant docs
+                        docs = res.get('documents', []) # list of paper abstracts
+                        metas = res.get('metadatas', []) # list of dicts with metadata (e.g., year, link)
                         if docs:
                             parts = []
-                            for i, d in enumerate(docs):
+                            for i, d in enumerate(docs): # for each retrieved doc, add metadata if available, i is index of the doc and d is the doc text
                                 meta = metas[i] if i < len(metas) else {}
                                 link = meta.get('link', '')
                                 year = meta.get('year', '')
