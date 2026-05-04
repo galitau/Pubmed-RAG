@@ -1,62 +1,93 @@
 # PubMed RAG Researcher
 
-## About This Project
-I built this tool to make researching medical papers easier. Instead of manually reading through dozens of abstracts on PubMed, this app fetches the latest papers for you on the topic of your choice, uses AI to summarize the key findings, recommends the best paper to read, and lets you ask specific questions about the data.
+## About
+PubMed RAG Researcher is a Streamlit app for rapid literature review.
+It searches PubMed abstracts, summarizes findings with Gemini, and supports follow-up Q&A grounded in retrieved papers.
 
-It uses a technique called **RAG (Retrieval-Augmented Generation)** to make sure the AI's answers are based on real scientific papers, not just general knowledge.
+## Updated Features
+- PubMed search with configurable date range and target paper count.
+- Iterative PMID batching to keep searching until enough valid papers are collected.
+- Optional free-access filtering behavior through the sidebar toggle.
+- Real-time retrieval progress UI (progress bar + per-paper status text).
+- Gemini-generated structured summary with:
+  - findings synthesis,
+  - most relevant paper recommendation,
+  - IEEE-style references.
+- Vector retrieval for chat using ChromaDB + Google Generative AI embeddings.
+- Automatic fallback to stored abstracts if vector retrieval is unavailable.
+- Retrieval-mode transparency in UI (shows whether answer used vector search or fallback).
+- Session-state chat history and conversation continuity.
+- PDF export options:
+  - summary only,
+  - summary with full follow-up chat log.
+- Graceful degradation when ChromaDB is unavailable.
 
-## Features
-* **Real-Time Search:** Connects directly to PubMed to find the most recent papers on your topic
-* **Smart Summaries:** Uses Google Gemini to read the abstracts and write a clear summary, highlighting the most relevant paper for you
-* **Chat with Data:** After the search, you can ask the AI follow-up questions (like "What were the side effects?") and it answers strictly based on the papers found
-* **Chat History:** The app saves your conversation so you can scroll back and see previous answers
-* **Smart Filtering:** Includes a toggle to filter for Free Full-Text (Open Access) only, ensuring you can read the papers found
-* **Export Reports:** Generates and downloads professional PDF reports containing the research summary, references, and your entire chat history
+## Retrieval Flow
+1. Search PubMed with your topic and date range.
+2. Build a local abstract corpus for the current run.
+3. Store documents in ChromaDB (when available).
+4. For follow-up questions, retrieve top-k semantically similar chunks.
+5. Fall back to full stored abstracts if DB retrieval is unavailable.
 
 ## Tech Stack
-* **Python**
-* **Streamlit** (for the web interface)
-* **Google Gemini API** (LLM)
-* **Metapub Library** (to access PubMed)
-* **FPDF** (for the PDF report generation)
+- Python
+- Streamlit
+- Google Gemini API (`google-generativeai`)
+- Metapub (PubMed access)
+- ChromaDB (vector store)
+- FPDF (PDF generation)
+- python-dotenv (env configuration)
 
 ## Demo
 https://github.com/user-attachments/assets/b21de8d1-b248-47c9-942c-9e269daee2eb
 
-## How to Run It
-
-1. Clone the repo
-2. Install requirements
-   
-   ```pip install -r requirements.txt```
-4. Create a .env file in the root folder and add your Google Gemini Key. (Optional: Add an NCBI API Key to increase PubMed fetch speed from 3 to 10 requests/second):
-   
-   ```GEMINI_API_KEY=your_key_here```
-   
-   ```NCBI_API_KEY=your_ncbi_key_here  # Optional but recommended```
-6. Run the App
-   
-   ```streamlit run app.py```
-
-## Testing (Smoke + Regression)
-
-This project includes automated test cases for the PDF export module, including:
-* **Smoke Test:** verifies PDF generation works end-to-end
-* **Regression Tests:** guard against failures on empty input, non-latin input, and larger report payloads
-
-Run tests from the project root:
+## Setup
+1. Clone this repository.
+2. Install dependencies:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v
+pip install -r requirements.txt
 ```
 
-## What I Learned
-* **Building RAG Applications:** I learned how to feed real-time data into an LLM to get accurate, factual responses
-* **Session State:** I figured out how to use Streamlit's session state to keep the chat history and summary from disappearing when the page reloads
-* **API Integration:** I learned how to work with the PubMed API to filter searches by date and relevance
-* **Binary File Generation:** I learned how to convert raw text and chat history into binary streams to generate downloadable PDF files using FPDF
+3. Create a `.env` file in the project root:
+
+```env
+GEMINI_API_KEY=your_key_here
+NCBI_API_KEY=your_ncbi_key_here
+```
+
+`NCBI_API_KEY` is optional but recommended for higher PubMed request throughput.
+
+4. Run the app:
+
+```bash
+streamlit run app.py
+```
+
+## Testing
+This repo currently includes tests for:
+- `pdf_generator.py` (smoke + regression coverage)
+- `database_manager.py` (ResearchDB behavior and fallbacks)
+
+Recommended (runs both unittest-style and pytest-style tests):
+
+```bash
+pytest -v tests
+```
+
+If `pytest` is not installed:
+
+```bash
+pip install pytest
+```
+
+## Current Limitations
+- Summaries and Q&A are bounded by abstract availability/quality from PubMed records.
+- If embeddings or vector DB initialization fails, chat falls back to raw abstract context.
+- Export currently targets PDF only.
 
 ## Future Improvements
-* **Semantic Search & Re-ranking:** Currently, the app relies on PubMed's keyword matching. Future updates will fetch a broader pool of papers and use Vector Embeddings (e.g., FAISS, ChromaDB) to locally re-rank them. This allows the user to find papers that match the meaning of their question, even if the specific keywords don't match
-* **Data Visualization:** Add interactive charts to visualize publication trends over time
-* **Full-Text Parsing:** Expand the pipeline to ingest and analyze full PDF text of open-access articles, rather than just abstract
+- Add citation-level source snippets in chat responses.
+- Improve ranking with metadata-aware re-ranking (year, study type, relevance score).
+- Add trend visualizations (publication count over time by topic).
+- Add optional full-text ingestion for open-access papers.
